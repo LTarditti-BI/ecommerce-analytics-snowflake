@@ -1,0 +1,331 @@
+-- 1. Limpieza absoluta de tablas y vistas previas
+DROP VIEW IF EXISTS MARKET.GOLD.FACT_VENTAS_ESPEJO;
+DROP TABLE IF EXISTS MARKET.GOLD.FACT_VENTAS;
+DROP TABLE IF EXISTS MARKET.GOLD.FACT_VENTAS_AUX;
+
+-- 2. Creamos la tabla auxiliar permisiva (todo entra como texto)
+CREATE TABLE MARKET.GOLD.FACT_VENTAS_AUX (
+    ORDER_ID VARCHAR,
+    PRODUCT_ID VARCHAR,
+    ORDEN_INGRESO_CARRITO VARCHAR,
+    ES_RECOMPRA VARCHAR,
+    USER_ID VARCHAR,
+    ORDEN_DIA_SEMANA VARCHAR,
+    ORDEN_HORA_DEL_DIA VARCHAR,
+    DIAS_DESDE_ANTERIOR VARCHAR,
+    NOMBRE_PRODUCTO VARCHAR,
+    CATEGORIA VARCHAR,
+    MARCA_LOCAL VARCHAR
+);
+
+-- 3. Carga optimizada: Soluciona el descuadre de columnas por comas internas y limpia espacios invisibles
+COPY INTO MARKET.GOLD.FACT_VENTAS_AUX
+FROM @MARKET.GOLD.MIS_ARCHIVOS
+FILE_FORMAT = (
+    TYPE = 'CSV'
+    FIELD_DELIMITER = ','
+    SKIP_HEADER = 1
+    FIELD_OPTIONALLY_ENCLOSED_BY = '"'      -- Respeta las comas que están dentro de comillas
+    TRIM_SPACE = TRUE                        -- ¡CLAVE! Elimina espacios en blanco que anulan el efecto de las comillas
+    NULL_IF = ('', 'NULL', 'null', 'NaN')    -- Captura variantes de nulos para que no rompan la carga
+    ERROR_ON_COLUMN_COUNT_MISMATCH = FALSE   -- Parche para omitir descuadres físicos de columnas
+)
+FORCE = TRUE
+ON_ERROR = 'CONTINUE';                       -- Evita que la carga se caiga si alguna fila está corrupta
+
+TRUNCATE TABLE MARKET.GOLD.FACT_VENTAS_AUX;
+
+-- 3. Carga optimizada: Soluciona el descuadre de columnas por comas internas y limpia espacios invisibles
+COPY INTO MARKET.GOLD.FACT_VENTAS_AUX
+FROM @MARKET.GOLD.MIS_ARCHIVOS
+FILE_FORMAT = (
+    TYPE = 'CSV'
+    FIELD_DELIMITER = ','
+    SKIP_HEADER = 1
+    FIELD_OPTIONALLY_ENCLOSED_BY = '"'      -- Respeta las comas que están dentro de comillas
+    TRIM_SPACE = TRUE                        -- ¡CLAVE! Elimina espacios en blanco que anulan el efecto de las comillas
+    NULL_IF = ('', 'NULL', 'null', 'NaN')    -- Captura variantes de nulos para que no rompan la carga
+    ERROR_ON_COLUMN_COUNT_MISMATCH = FALSE   -- Parche para omitir descuadres físicos de columnas
+)
+FORCE = TRUE
+ON_ERROR = 'CONTINUE';                       -- Evita que la carga se caiga si alguna fila está corrupta
+----------------------------------------------------------------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------------------------------------------------------
+-- Eliminamos la tabla auxiliar que tenía el nombre de columna equivocado
+DROP TABLE IF EXISTS MARKET.GOLD.FACT_VENTAS_AUX;
+
+-- 1. Creamos la tabla auxiliar corregida (con DIAS_DESDE_ULTIMA_COMPRA)
+CREATE TABLE MARKET.GOLD.FACT_VENTAS_AUX (
+    ORDER_ID VARCHAR,
+    PRODUCT_ID VARCHAR,
+    ORDEN_INGRESO_CARRITO VARCHAR,
+    ES_RECOMPRA VARCHAR,
+    USER_ID VARCHAR,
+    ORDEN_DIA_SEMANA VARCHAR,
+    ORDEN_HORA_DEL_DIA VARCHAR,
+    DIAS_DESDE_ULTIMA_COMPRA VARCHAR, -- <-- CORREGIDO AQUÍ
+    NOMBRE_PRODUCTO VARCHAR,
+    CATEGORIA VARCHAR,
+    MARCA_LOCAL VARCHAR
+);
+
+
+SELECT COUNT(*) AS total_filas 
+FROM MARKET.GOLD.FACT_VENTAS_AUX;
+
+-- 2. Cargamos uniendo las comas de productos rebeldes y asignando a las columnas correspondientes
+COPY INTO MARKET.GOLD.FACT_VENTAS_AUX (
+    ORDER_ID, 
+    PRODUCT_ID, 
+    ORDEN_INGRESO_CARRITO, 
+    ES_RECOMPRA, 
+    USER_ID, 
+    ORDEN_DIA_SEMANA, 
+    ORDEN_HORA_DEL_DIA, 
+    DIAS_DESDE_ULTIMA_COMPRA, -- Corregido
+    NOMBRE_PRODUCTO, 
+    CATEGORIA, 
+    MARCA_LOCAL
+)
+FROM (
+    SELECT 
+        $1, $2, $3, $4, $5, $6, $7, $8,
+        -- Si Snowflake separó el producto por tener comas internas:
+        CASE 
+            WHEN $12 IS NOT NULL THEN CONCAT($9, ', ', $10, ', ', $11)
+            WHEN $11 IS NOT NULL THEN CONCAT($9, ', ', $10)
+            ELSE $9
+        END,
+        -- La categoría siempre es la penúltima con datos
+        CASE 
+            WHEN $12 IS NOT NULL THEN $12
+            WHEN $11 IS NOT NULL THEN $11
+            ELSE $10
+        END,
+        -- La marca siempre es la última con datos
+        CASE 
+            WHEN $12 IS NOT NULL THEN $13
+            WHEN $11 IS NOT NULL THEN $12
+            ELSE $11
+        END
+    FROM @MARKET.GOLD.MIS_ARCHIVOS
+)
+FILE_FORMAT = (
+    TYPE = 'CSV'
+    FIELD_DELIMITER = ','
+    SKIP_HEADER = 1
+    NULL_IF = ('', 'NULL', 'null', 'NaN')
+    ERROR_ON_COLUMN_COUNT_MISMATCH = FALSE
+)
+FORCE = TRUE;
+
+SELECT MARCA_LOCAL, COUNT(*) as cantidad_filas
+FROM MARKET.GOLD.FACT_VENTAS_AUX
+GROUP BY MARCA_LOCAL
+ORDER BY MARCA_LOCAL ASC;
+---------------------------------------------------------------------------------------------------------------------------------------
+---------------------------------------------------------------------------------------------------------------------------------------
+DROP TABLE IF EXISTS MARKET.GOLD.FACT_VENTAS_AUX;
+
+--1. CREATE TABLE MARKET.GOLD.FACT_VENTAS_AUX (
+    ORDER_ID VARCHAR,
+    PRODUCT_ID VARCHAR,
+    ORDEN_INGRESO_CARRITO VARCHAR,
+    ES_RECOMPRA VARCHAR,
+    USER_ID VARCHAR,
+    ORDEN_DIA_SEMANA VARCHAR,
+    ORDEN_HORA_DEL_DIA VARCHAR,
+    DIAS_DESDE_ULTIMA_COMPRA VARCHAR,
+    NOMBRE_PRODUCTO VARCHAR,
+    CATEGORIA VARCHAR,
+    MARCA_LOCAL VARCHAR
+);
+
+COPY INTO MARKET.GOLD.FACT_VENTAS_AUX (
+    ORDER_ID, 
+    PRODUCT_ID, 
+    ORDEN_INGRESO_CARRITO, 
+    ES_RECOMPRA, 
+    USER_ID, 
+    ORDEN_DIA_SEMANA, 
+    ORDEN_HORA_DEL_DIA, 
+    DIAS_DESDE_ULTIMA_COMPRA, 
+    NOMBRE_PRODUCTO, 
+    CATEGORIA, 
+    MARCA_LOCAL
+)
+FROM (
+    SELECT 
+        -- Las primeras 8 columnas se extraen de forma normal buscando sus posiciones de comas
+        SPLIT_PART($1, ',', 1) AS ORDER_ID,
+        SPLIT_PART($1, ',', 2) AS PRODUCT_ID,
+        SPLIT_PART($1, ',', 3) AS ORDEN_INGRESO_CARRITO,
+        SPLIT_PART($1, ',', 4) AS ES_RECOMPRA,
+        SPLIT_PART($1, ',', 5) AS USER_ID,
+        SPLIT_PART($1, ',', 6) AS ORDEN_DIA_SEMANA,
+        SPLIT_PART($1, ',', 7) AS ORDEN_HORA_DEL_DIA,
+        SPLIT_PART($1, ',', 8) AS DIAS_DESDE_ULTIMA_COMPRA,
+        
+        -- El producto es todo lo que esté en medio de las primeras 8 columnas y las últimas 2
+        REGEXP_REPLACE($1, '^([^,]+,){8}(.*),[^,]+,[^,]+$', '\\2') AS NOMBRE_PRODUCTO,
+        
+        -- La categoría es el penúltimo valor (capturado justo antes del final)
+        REGEXP_REPLACE($1, '.*,([^,]+),[^,]+$', '\\1') AS CATEGORIA,
+        
+        -- La marca es todo lo que esté después de la última coma
+        REGEXP_SUBSTR($1, '[^,]+$') AS MARCA_LOCAL
+    FROM @MARKET.GOLD.MIS_ARCHIVOS
+)
+FILE_FORMAT = (
+    TYPE = 'CSV'
+    FIELD_DELIMITER = 'NONE' -- Lee toda la línea junta para que no se rompa nada
+    SKIP_HEADER = 1
+)
+FORCE = TRUE;
+
+SELECT MARCA_LOCAL, COUNT(*) as cantidad_filas
+FROM MARKET.GOLD.FACT_VENTAS_AUX
+GROUP BY MARCA_LOCAL
+ORDER BY MARCA_LOCAL ASC;
+
+-- 4. Creamos la tabla definitiva limpia y con los nombres de Power BI
+CREATE OR REPLACE TABLE MARKET.GOLD.FACT_VENTAS AS
+SELECT 
+    TRY_CAST(ORDER_ID AS NUMBER) AS ID_ORDEN, 
+    TRY_CAST(PRODUCT_ID AS NUMBER) AS ID_PRODUCTO, 
+    TRY_CAST(ORDEN_INGRESO_CARRITO AS NUMBER) AS ORDEN_INGRESO_CARRITO, 
+    TRY_CAST(ES_RECOMPRA AS NUMBER) AS RECOMPRA, 
+    TRY_CAST(USER_ID AS NUMBER) AS ID_USUARIO, 
+    CASE 
+        WHEN ORDEN_DIA_SEMANA LIKE 'S%' AND ORDEN_DIA_SEMANA LIKE '%bado%' THEN 'Sábado'
+        WHEN ORDEN_DIA_SEMANA LIKE 'M%' AND ORDEN_DIA_SEMANA LIKE '%rcoles%' THEN 'Miércoles'
+        ELSE ORDEN_DIA_SEMANA 
+    END AS ORDEN_DIA_SEMANA, 
+    TRY_CAST(ORDEN_HORA_DEL_DIA AS NUMBER) AS ORDEN_HORA_DEL_DIA, 
+    TRY_CAST(DIAS_DESDE_ULTIMA_COMPRA AS NUMBER) AS DIAS_DESDE_ULTIMA_COMPRA, -- <-- CORREGIDO AQUÍ
+    NOMBRE_PRODUCTO, 
+    CASE 
+        WHEN LOWER(CATEGORIA) = 'pantry' THEN 'Almacén'
+        WHEN LOWER(CATEGORIA) = 'produce' OR CATEGORIA = 'Frutas y Verduras' THEN 'Frutas y Verduras'
+        WHEN CATEGORIA LIKE '%L%cteos%' OR LOWER(CATEGORIA) = 'dairy eggs' THEN 'Lácteos y Huevos'
+        WHEN LOWER(CATEGORIA) = 'snacks' OR CATEGORIA = 'Golosinas y Snacks' THEN 'Golosinas y Snacks'
+        WHEN LOWER(CATEGORIA) = 'beverages' OR CATEGORIA = 'Bebidas' THEN 'Bebidas'
+        WHEN LOWER(CATEGORIA) = 'frozen' OR CATEGORIA = 'Congelados' THEN 'Congelados'
+        WHEN LOWER(CATEGORIA) = 'panaderÃa' OR LOWER(CATEGORIA) = 'bakery' OR CATEGORIA LIKE '%Panader%' THEN 'Panadería'
+        WHEN LOWER(CATEGORIA) = 'canned goods' OR CATEGORIA = 'Enlatados y Conservas' THEN 'Conservas - Enlatados'
+        WHEN LOWER(CATEGORIA) = 'deli' OR CATEGORIA = 'Fiambreia y Rotiseria' THEN 'Fiambrería y Rotisería'
+        WHEN LOWER(CATEGORIA) = 'dry goods pasta' OR CATEGORIA = 'Pastas y Alimentos Secos' THEN 'Pastas Secas'
+        WHEN LOWER(CATEGORIA) = 'household' OR CATEGORIA = 'Hogar' THEN 'Hogar'
+        WHEN LOWER(CATEGORIA) = 'meat seafood' OR CATEGORIA = 'Carnes y Pescados' THEN 'Carnicería y Pescadería'
+        WHEN LOWER(CATEGORIA) = 'breakfast' OR CATEGORIA = 'Desayuno y Merienda' THEN 'Desayuno'
+        WHEN LOWER(CATEGORIA) = 'personal care' THEN 'Cuidado Personal'
+        WHEN LOWER(CATEGORIA) = 'babies' OR CATEGORIA = 'Bebés' THEN 'Cuidado del Bebé'
+        WHEN LOWER(CATEGORIA) = 'international' THEN 'Internacional'
+        WHEN LOWER(CATEGORIA) = 'alcohol' THEN 'Bebidas con Alcohol'
+        WHEN LOWER(CATEGORIA) = 'pets' THEN 'Mascotas'
+        WHEN LOWER(CATEGORIA) = 'bulk' THEN 'A Granel'
+        ELSE 'General'
+    END AS CATEGORIA_PRODUCTO,
+    
+-- 5. Recreamos la vista espejo para Power BI (incluyendo MARCA_LOCAL)
+CREATE OR REPLACE VIEW MARKET.GOLD.FACT_VENTAS_ESPEJO AS
+SELECT 
+    ID_ORDEN, 
+    NOMBRE_PRODUCTO, 
+    CATEGORIA_PRODUCTO,
+    MARCA_LOCAL -- <-- CORREGIDO AQUÍ (Ahora Power BI la podrá ver en la Vista)
+FROM MARKET.GOLD.FACT_VENTAS;
+
+-- Verificamos que se haya creado bien la vista
+SELECT * FROM MARKET.GOLD.FACT_VENTAS_ESPEJO LIMIT 10;
+
+
+-- 6. Comprobación de carga final
+SELECT COUNT(*) AS total_filas_finales FROM MARKET.GOLD.FACT_VENTAS;
+
+-- Verificamos que se haya cargado bien la tabla definitiva
+SELECT * FROM MARKET.GOLD.FACT_VENTAS LIMIT 10;
+
+
+-- 7. Creamos la tabla de dimensión de días
+CREATE OR REPLACE TABLE MARKET.GOLD.DIM_DIAS (
+    ID_DIA INT,
+    DIA_TEXTO VARCHAR(50)
+);
+
+-- Insertamos los datos de lunes a domingo
+INSERT INTO MARKET.GOLD.DIM_DIAS (ID_DIA, DIA_TEXTO) VALUES
+(0, 'Domingo'),
+(1, 'Lunes'),
+(2, 'Martes'),
+(3, 'Miércoles'),
+(4, 'Jueves'),
+(5, 'Viernes'),
+(6, 'Sábado');
+
+-- Verificamos que se haya cargado bien la dimensión
+SELECT * FROM MARKET.GOLD.DIM_DIAS;
+
+
+-- 8. Creamos la tabla Calendario autogenerada
+CREATE OR REPLACE TABLE MARKET.GOLD.Calendario AS
+WITH GENERADOR_FECHAS AS (
+    -- Generamos una fila por cada día para un rango amplio de años (de 2020 a 2026 inclusive)
+    SELECT DATEADD(day, SEQ4(), '2020-01-01'::DATE) AS DATE_KEY
+    FROM TABLE(GENERATOR(ROWCOUNT => 3000)) -- 3000 días son aprox 8 años
+)
+SELECT 
+    DATE_KEY AS "Date",
+    YEAR(DATE_KEY) AS "Año",
+    MONTH(DATE_KEY) AS "Mes",
+    DAY(DATE_KEY) AS "Dia_Numero",
+    CASE DAYNAME(DATE_KEY)
+        WHEN 'Mon' THEN 'Lunes'
+        WHEN 'Tue' THEN 'Martes'
+        WHEN 'Wed' THEN 'Miércoles'
+        WHEN 'Thu' THEN 'Jueves'
+        WHEN 'Fri' THEN 'Viernes'
+        WHEN 'Sat' THEN 'Sábado'
+        WHEN 'Sun' THEN 'Domingo'
+    END AS "Dia_Semana"
+FROM GENERADOR_FECHAS
+WHERE DATE_KEY <= '2026-12-31'::DATE;
+
+-- Verificamos la tabla calendario
+SELECT * FROM MARKET.GOLD.Calendario LIMIT 10;
+
+SELECT MIN("Date") AS fecha_inicio, MAX("Date") AS fecha_fin FROM MARKET.GOLD.Calendario;  
+
+---------------------------------------------------------------------------------------------------------------------------------
+-- VERIFICACIÓN FINAL DE TODAS LAS TABLAS --
+---------------------------------------------------------------------------------------------------------------------------------
+-- Control del Volumen --
+SELECT COUNT(*) AS total_filas 
+FROM MARKET.GOLD.FACT_VENTAS;
+
+-- Control de Valores Nulos --
+SELECT 
+    COUNT_IF(ID_ORDEN IS NULL) AS ordenes_vacias,
+    COUNT_IF(ID_PRODUCTO IS NULL) AS productos_vacios,
+    COUNT_IF(MARCA_LOCAL IS NULL OR MARCA_LOCAL = '') AS marcas_vacias,
+    COUNT_IF(CATEGORIA_PRODUCTO IS NULL) AS categorias_vacias
+FROM MARKET.GOLD.FACT_VENTAS;
+
+-- Control de Marcas limpias --
+SELECT MARCA_LOCAL, COUNT(*) AS cantidad
+FROM MARKET.GOLD.FACT_VENTAS
+GROUP BY MARCA_LOCAL
+ORDER BY cantidad DESC;
+
+-- Control de Categorías traducidas --
+SELECT CATEGORIA_PRODUCTO, COUNT(*) AS cantidad
+FROM MARKET.GOLD.FACT_VENTAS
+GROUP BY CATEGORIA_PRODUCTO
+ORDER BY cantidad DESC;
+
+-- "Prueba Ácida" (Vistazo de una orden de compra completa)
+SELECT * 
+FROM MARKET.GOLD.FACT_VENTAS
+WHERE ID_ORDEN = 2031223 -- Esta es la orden de tu fila rebelde original
+ORDER BY ORDEN_INGRESO_CARRITO ASC;
+

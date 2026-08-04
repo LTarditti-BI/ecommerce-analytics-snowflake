@@ -1,0 +1,95 @@
+-- =====================================================================
+-- CAPA BRONZE: CREACIÓN DE ENTORNO, STAGE E INGESTIÓN DE DATOS CRUDOS
+-- =====================================================================
+
+-- 1. Creo la base de datos y el esquema de trabajo si no existen
+CREATE DATABASE IF NOT EXISTS proyecto_etl;
+USE DATABASE proyecto_etl;
+
+CREATE SCHEMA IF NOT EXISTS bronze;
+USE SCHEMA bronze;
+
+-- 2. Tabla de Órdenes (Muestra reducida)
+CREATE OR REPLACE TABLE bronze.stg_orders (
+    order_id INT,
+    user_id INT,
+    eval_set STRING,
+    order_number INT,
+    order_dow INT,
+    order_hour_of_day INT,
+    days_since_prior_order FLOAT
+);
+
+-- 3. Tabla de Detalles de Órdenes
+CREATE OR REPLACE TABLE bronze.stg_order_products (
+    order_id INT,
+    product_id INT,
+    add_to_cart_order INT,
+    reordered INT
+);
+
+-- 4. Tabla de Productos
+CREATE OR REPLACE TABLE bronze.stg_products (
+    product_id INT,
+    product_name STRING,
+    aisle_id INT,
+    department_id INT
+);
+
+-- 5. Tabla de Pasillos (Aisles)
+CREATE OR REPLACE TABLE bronze.stg_aisles (
+    aisle_id INT,
+    aisle STRING
+);
+
+-- 6. Tabla de Departamentos
+CREATE OR REPLACE TABLE bronze.stg_departments (
+    department_id INT,
+    department STRING
+);
+
+USE SCHEMA bronze;
+
+-- Creación del formato para que Snowflake entienda cómo leer los CSVs
+CREATE OR REPLACE FILE FORMAT csv_format
+    TYPE = 'CSV'
+    FIELD_DELIMITER = ','
+    SKIP_HEADER = 1
+    FIELD_OPTIONALLY_ENCLOSED_BY = '"'
+    NULL_IF = ('', 'NA', 'null');
+
+-- Creación del Stage interno
+CREATE OR REPLACE STAGE my_internal_stage
+    FILE_FORMAT = csv_format;
+
+---------- Realicé la carga de los archivos desde mi carpeta Proyectos Laborales_Proyecto 2 -------------    
+
+USE DATABASE proyecto_etl;
+USE SCHEMA bronze;
+
+-- 1. Cargar Órdenes de DS_Market_Basket_Analysis
+COPY INTO bronze.stg_orders
+FROM @my_internal_stage/orders.csv;
+
+-- 2. Cargar Detalles de Órdenes
+COPY INTO bronze.stg_order_products
+FROM @my_internal_stage/order_products__train.csv;
+
+-- 3. Cargar el Maestro de Productos
+COPY INTO bronze.stg_products
+FROM @my_internal_stage/products.csv;
+
+
+COPY INTO bronze.stg_aisles
+FROM @my_internal_stage/aisles.csv;
+
+
+COPY INTO bronze.stg_departments
+FROM @my_internal_stage/departments.csv;
+
+-- VERIFICACIONES --
+
+SELECT COUNT(*) AS total_ordenes FROM bronze.stg_orders;
+
+
+SELECT * FROM bronze.stg_products LIMIT 10;

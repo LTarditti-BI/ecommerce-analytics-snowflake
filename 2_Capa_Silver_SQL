@@ -1,0 +1,92 @@
+-- ============================================================================
+--                          CAPA SILVER: LIMPIEZA Y TRANSFORMACIONES
+-- ============================================================================
+
+-- 1. Creación del esquema SILVER para organizar las nuevas tablas
+CREATE SCHEMA IF NOT EXISTS silver;
+USE SCHEMA silver;
+
+-- 2. Creación de la tabla de productos limpia, traducida y con marcas nacionales
+CREATE OR REPLACE TABLE silver.dim_productos AS
+SELECT 
+    p.product_id,
+    
+-- Traducción de los nombres de los productos más vendidos o estratégicos
+    CASE 
+        WHEN p.product_name ILIKE '%milk%' THEN 'Leche Entera'
+        WHEN p.product_name ILIKE '%yogurt%' THEN 'Yogur Firme'
+        WHEN p.product_name ILIKE '%chocolate%' THEN 'Chocolate Premium'
+        WHEN p.product_name ILIKE '%ice cream%' THEN 'Helado Artesanal'
+        WHEN p.product_name ILIKE '%cookie%' THEN 'Galletitas Dulces'
+        WHEN p.product_name ILIKE '%snack%' THEN 'Snacks Salados'
+        WHEN p.product_name ILIKE '%soda%' THEN 'Gaseosa Cola'
+        WHEN p.product_name ILIKE '%water%' THEN 'Agua Mineral'
+        ELSE p.product_name -- Si no combina, dejamos el nombre original por ahora
+    END AS producto_nombre_es,
+    
+-- Traducción de las categorías grandes (Departamentos)
+    CASE 
+        WHEN d.department = 'dairy eggs' THEN 'Lácteos y Huevos'
+        WHEN d.department = 'snacks' THEN 'Golosinas y Snacks'
+        WHEN d.department = 'beverages' THEN 'Bebidas'
+        WHEN d.department = 'frozen' THEN 'Congelados'
+        WHEN d.department = 'bakery' THEN 'Panadería'
+        WHEN d.department = 'produce' THEN 'Frutas y Verduras'
+        ELSE d.department 
+    END AS departamento_es,
+    
+-- Regla de negocio de marcas locales para el Market Basket Analysis
+    CASE 
+        WHEN d.department = 'snacks' OR p.product_name ILIKE '%cookie%' THEN 'Arcor'
+        WHEN d.department = 'dairy eggs' OR p.product_name ILIKE '%yogurt%' THEN 'Danone'
+        WHEN p.product_name ILIKE '%chocolate%' OR p.product_name ILIKE '%ice cream%' THEN 'Rapanui'
+        ELSE 'Otras Marcas'
+    END AS marca_local,
+    
+    p.aisle_id
+FROM bronze.stg_products p
+LEFT JOIN bronze.stg_departments d ON p.department_id = d.department_id;
+
+--Consulta para comprobar que la traducción y la marca funcionó --
+SELECT producto_nombre_es, departamento_es, marca_local 
+FROM silver.dim_productos 
+WHERE marca_local != 'Otras Marcas'
+LIMIT 15;
+
+-- 3. Creación de la tabla de órdenes limpia en la capa Silver
+CREATE OR REPLACE TABLE silver.dim_ordenes AS
+SELECT 
+    order_id,
+    user_id,
+    order_number,
+    
+-- Pasamos el número de día de la semana a un texto entendible
+    CASE order_dow
+        WHEN 0 THEN 'Domingo'
+        WHEN 1 THEN 'Lunes'
+        WHEN 2 THEN 'Martes'
+        WHEN 3 THEN 'Miércoles'
+        WHEN 4 THEN 'Jueves'
+        WHEN 5 THEN 'Viernes'
+        WHEN 6 THEN 'Sábado'
+    END AS orden_dia_semana,
+    order_hour_of_day AS orden_hora_del_dia,
+    
+-- Limpieza de los valores nulos: si es NULL (primera compra), poner 0
+   
+   COALESCE(days_since_prior_order, 0) AS dias_desde_ultima_compra
+FROM bronze.stg_orders;
+
+-- Verificación --
+SELECT order_id, orden_dia_semana, orden_hora_del_dia, dias_desde_ultima_compra 
+FROM silver.dim_ordenes 
+LIMIT 10;
+
+-- Creación de la tabla dim_usuario para trackear el comportamiento histórico del cliente --
+CREATE OR REPLACE TABLE silver.dim_usuarios AS
+SELECT 
+    user_id AS usuario_key,
+    COUNT(DISTINCT order_id) AS total_ordenes_historicas,
+    AVG(COALESCE(days_since_prior_order, 0)) AS promedio_dias_entre_compras
+FROM bronze.stg_orders
+GROUP BY user_id;
